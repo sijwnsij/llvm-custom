@@ -134,6 +134,7 @@ jobs:
           export LD=${TOOLCHAIN}/bin/ld
           export OBJCOPY=${TOOLCHAIN}/bin/objcopy
           export AR=${TOOLCHAIN}/bin/ar
+          export RANLIB=${TOOLCHAIN}/bin/ranlib
           export STRIP=${TOOLCHAIN}/bin/strip
 
           rm -rf build output/ zlib/ zstd/
@@ -222,6 +223,7 @@ jobs:
             -DCMAKE_LINKER="${TOOLCHAIN}/bin/ld" \
             -DCMAKE_OBJCOPY="${TOOLCHAIN}/bin/objcopy" \
             -DCMAKE_AR="${TOOLCHAIN}/bin/ar" \
+            -DCMAKE_RANLIB="${TOOLCHAIN}/bin/ranlib" \
             -DCMAKE_STRIP="${TOOLCHAIN}/bin/strip" \
             -DCMAKE_C_FLAGS="-fstack-protector-strong -fsanitize=undefined -static" \
             -DCMAKE_CXX_FLAGS="-fstack-protector-strong -fsanitize=undefined -static" \
