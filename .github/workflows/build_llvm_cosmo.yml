@@ -108,8 +108,8 @@ jobs:
           export CXX=${{matrix.target}}-c++
           export LD=${{matrix.target}}-ld
           export OBJCOPY=${{matrix.target}}-objcopy
-          export AR=${{matrix.target}}-ar
-          export RANLIB=${{matrix.target}}-ranlib
+          export AR=${{runner.temp}}/cosmocc-4.0.2/${{matrix.target}}-ar
+          export RANLIB=${{runner.temp}}/cosmocc-4.0.2/unknown-unknown-cosmo-ranlib
 
           rm -rf build output/ zlib/ zstd/
 
@@ -194,8 +194,8 @@ jobs:
             -DCMAKE_ASM_COMPILER="${{matrix.target}}-cc" \
             -DCMAKE_LINKER="${{matrix.target}}-ld" \
             -DCMAKE_OBJCOPY="${{matrix.target}}-objcopy" \
-            -DCMAKE_AR="${{matrix.target}}-ar" \
-            -DCMAKE_RANLIB="${{matrix.target}}-ranlib" \
+            -DCMAKE_AR="${{runner.temp}}/cosmocc-4.0.2/${{matrix.target}}-ar" \
+            -DCMAKE_RANLIB="${{runner.temp}}/cosmocc-4.0.2/unknown-unknown-cosmo-ranlib" \
             -DCMAKE_C_FLAGS="-static" \
             -DCMAKE_CXX_FLAGS="-static" \
             -DCMAKE_EXE_LINKER_FLAGS="-static" \
