@@ -1,4 +1,4 @@
-name: Build LLVM (Cosmopolitan Libc)
+name: Build LLVM (Bionic libc)
 run-name: Build LLVM for r${{inputs.version}} ${{inputs.projects}}
 on:
   workflow_dispatch:
@@ -13,18 +13,22 @@ on:
         default: "bolt;clang;clang-tools-extra;lld"
         required: true
 
+permissions:
+  contents: write
+  actions: write
+
 jobs:
   build:
     strategy:
       fail-fast: false
       matrix:
-        target: [aarch64-unknown-cosmo, x86_64-unknown-cosmo]
+        target: [armv7a-linux-androideabi, aarch64-linux-android, riscv64-linux-android, i686-linux-android, x86_64-linux-android]
     runs-on: ubuntu-24.04
     env:
+      ANDROID_PLATFORM: 25
       ROOTDIR: ${{github.workspace}}
       TARGET_BUILD_DIR: ${{github.workspace}}/build/${{matrix.target}}
       TARGET_INSTALL_DIR: ${{github.workspace}}/output/${{matrix.target}}
-      MODE: tiny
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@v10
@@ -87,35 +91,38 @@ jobs:
 
           rm -rf "$ROOTDIR/../llvm_android"
 
-          if [ -d "$ROOTDIR/patches/cosmo/llvm/$LLVM_VERSION" ]; then
-            for PATCH in $ROOTDIR/patches/cosmo/llvm/$LLVM_VERSION/*.patch; do
-              echo "Applying $(basename "$PATCH")..."
-              git apply "$PATCH"
-            done
-          fi
-
           for PATCH in $ROOTDIR/patches/global/llvm/$LLVM_VERSION/*.patch; do
             echo "Applying $(basename "$PATCH")..."
             git apply "$PATCH"
           done
 
-          echo "All patches applied successfully."
+          sed -i '/^#if defined(__x86_64__) \&\& defined(__ELF__) \&\& defined(__linux__)$/ {
+            /&& !defined(__ANDROID__)/! s/$/ \&\& !defined(__ANDROID__)/
+          }' $ROOTDIR/llvm/tools/llvm-rtdyld/llvm-rtdyld.cpp || true
 
-      - name: Setup cosmo toolchain
-        uses: bjia56/setup-cosmocc@v0.0.3
-        with:
-          version: "4.0.2"
+          echo "All patches applied successfully."
 
       - name: Install dependencies
         run: sudo apt install -y ninja-build
 
       - name: Build dependencies
         run : |
-          export CC=${{matrix.target}}-cc
-          export CXX=${{matrix.target}}-c++
-          export LD=${{matrix.target}}-ld
-          export OBJCOPY=${{matrix.target}}-objcopy
-          export AR=${{matrix.target}}-ar
+          if [ "${{ matrix.target }}" = "riscv64-linux-android" ]; then
+            ANDROID_PLATFORM=35
+          else
+            ANDROID_PLATFORM=${ANDROID_PLATFORM}
+          fi
+
+          TOOLCHAIN=$ROOTDIR/android-ndk-r${{inputs.version}}/toolchains/llvm/prebuilt/linux-x86_64
+          export CC=${TOOLCHAIN}/bin/${{matrix.target}}${ANDROID_PLATFORM}-clang
+          export CXX=${TOOLCHAIN}/bin/${{matrix.target}}${ANDROID_PLATFORM}-clang++
+          export CFLAGS="-fstack-protector-strong"
+          export CXXFLAGS="-fstack-protector-strong"
+          export LD=${TOOLCHAIN}/bin/ld
+          export OBJCOPY=${TOOLCHAIN}/bin/llvm-objcopy
+          export AR=${TOOLCHAIN}/bin/llvm-ar
+          export RANLIB=${TOOLCHAIN}/bin/llvm-ranlib
+          export STRIP=${TOOLCHAIN}/bin/llvm-strip
 
           rm -rf build output/ zlib/ zstd/
 
@@ -146,7 +153,7 @@ jobs:
               (
                   cd "${TARGET_BUILD_DIR}/zstd"
 
-                  $CC -c \
+                  $CC $CFLAGS -c \
                       "${ROOTDIR}/zstd/lib/decompress/zstd_ddict.c" \
                       "${ROOTDIR}/zstd/lib/decompress/zstd_decompress.c" \
                       "${ROOTDIR}/zstd/lib/decompress/huf_decompress.c" \
@@ -187,6 +194,34 @@ jobs:
 
       - name: Build LLVM
         run: |
+          if [ "${{ matrix.target }}" = "riscv64-linux-android" ]; then
+            ANDROID_PLATFORM=35
+          else
+            ANDROID_PLATFORM=${ANDROID_PLATFORM}
+          fi
+
+          ANDROID_NDK_HOME=$ROOTDIR/android-ndk-r${{inputs.version}}
+          ANDROID_NDK_ROOT=$ANDROID_NDK_HOME
+          TOOLCHAIN=$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64
+
+          case "${{ matrix.target }}" in
+            armv7a-linux-androideabi)
+              ANDROID_ABI=armeabi-v7a
+              ;;
+            aarch64-linux-android)
+              ANDROID_ABI=arm64-v8a
+              ;;
+            i686-linux-android)
+              ANDROID_ABI=x86
+              ;;
+            x86_64-linux-android)
+              ANDROID_ABI=x86_64
+              ;;
+            riscv64-linux-android)
+              ANDROID_ABI=riscv64
+              ;;
+          esac
+
           cmake -S "$ROOTDIR/llvm" -B "${TARGET_BUILD_DIR}" -G Ninja \
             -DCMAKE_INSTALL_PREFIX="${ROOTDIR}/llvm-${{matrix.target}}" \
             -DCMAKE_PREFIX_PATH="${TARGET_INSTALL_DIR}" \
@@ -194,22 +229,26 @@ jobs:
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DCMAKE_CROSSCOMPILING=True \
             -DCMAKE_SYSTEM_NAME=Linux \
-            -DLLVM_DEFAULT_TARGET_TRIPLE=${{matrix.target}} \
-            -DCMAKE_C_COMPILER="${{matrix.target}}-cc" \
-            -DCMAKE_CXX_COMPILER="${{matrix.target}}-c++" \
-            -DCMAKE_ASM_COMPILER="${{matrix.target}}-cc" \
-            -DCMAKE_LINKER="${{matrix.target}}-ld" \
-            -DCMAKE_OBJCOPY="${{matrix.target}}-objcopy" \
-            -DCMAKE_C_FLAGS="-static" \
-            -DCMAKE_CXX_FLAGS="-static" \
-            -DCMAKE_EXE_LINKER_FLAGS="-static" \
+            -DLLVM_DEFAULT_TARGET_TRIPLE=${{matrix.target}}${ANDROID_PLATFORM} \
+            -DCMAKE_C_COMPILER="${TOOLCHAIN}/bin/${{matrix.target}}${ANDROID_PLATFORM}-clang" \
+            -DCMAKE_CXX_COMPILER="${TOOLCHAIN}/bin/${{matrix.target}}${ANDROID_PLATFORM}-clang++" \
+            -DCMAKE_ASM_COMPILER="${TOOLCHAIN}/bin/${{matrix.target}}${ANDROID_PLATFORM}-clang" \
+            -DCMAKE_LINKER="${TOOLCHAIN}/bin/ld" \
+            -DCMAKE_OBJCOPY="${TOOLCHAIN}/bin/llvm-objcopy" \
+            -DCMAKE_AR="${TOOLCHAIN}/bin/llvm-ar" \
+            -DCMAKE_RANLIB="${TOOLCHAIN}/bin/llvm-ranlib" \
+            -DCMAKE_STRIP="${TOOLCHAIN}/bin/llvm-strip" \
+            -DCMAKE_C_FLAGS="-fstack-protector-strong" \
+            -DCMAKE_CXX_FLAGS="-fstack-protector-strong" \
             -DLLVM_ENABLE_PROJECTS="${{inputs.projects}}" \
             -DLLVM_ENABLE_ZLIB=FORCE_ON \
             -DLLVM_ENABLE_ZSTD=FORCE_ON \
+            -Dzstd_LIBRARY="${TARGET_INSTALL_DIR}/lib/libzstd.a" \
+            -Dzstd_INCLUDE_DIR="${TARGET_INSTALL_DIR}/include" \
             -DLLVM_USE_STATIC_ZSTD=ON \
             -DLLVM_BUILD_STATIC=ON \
-            -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DCLANG_ENABLE_ARCMT=OFF \
+            -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLIBCLANG_BUILD_STATIC=ON \
             -DCMAKE_SKIP_INSTALL_RPATH=TRUE \
             -DBUILD_SHARED_LIBS=OFF \
@@ -236,10 +275,10 @@ jobs:
             -DLLVM_ENABLE_EH=OFF \
             -DLLVM_ENABLE_RTTI=OFF \
             -DLLVM_ENABLE_LTO=OFF \
+            -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_MODULES=OFF \
             -DLLVM_ENABLE_PEDANTIC=OFF \
             -DLLVM_ENABLE_FFI=OFF \
-            -DLLVM_ENABLE_TERMINFO=OFF \
             -DLLVM_ENABLE_LIBPFM=OFF \
             -DLLVM_ENABLE_LIBEDIT=OFF \
             -DLLVM_ENABLE_LIBXML2=OFF \
@@ -252,80 +291,22 @@ jobs:
 
           cmake --build "${TARGET_BUILD_DIR}" --target install
 
-      - name: Check
+      - name: Strip and Check
         run: |
-          file llvm-${{matrix.target}}/bin/*
-          tree llvm-${{matrix.target}}
-
-      - name: Archive
-        run: |
-          tar -c llvm-${{matrix.target}} >llvm-${{matrix.target}}.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: llvm-${{matrix.target}}
-          path: llvm-${{matrix.target}}.tar
-
-  ape-link:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - uses: geekyeggo/delete-artifact@v5.1.0
-        with:
-          name: llvm-*
-
-      - name: Extract artifacts
-        run: |
-          for target in aarch64-unknown-cosmo x86_64-unknown-cosmo; do
-            tar -xvf llvm-${target}.tar
-            rm llvm-${target}.tar
-          done
-
-      - name: Setup cosmo toolchain
-        uses: bjia56/setup-cosmocc@v0.0.3
-        with:
-          version: "4.0.2"
-
-      - name: Link APE
-        run: |
-          COSMO=$(dirname "$(dirname "$(command -v cosmocc)")")
-          
-          mkdir -p llvm-ape/bin
-          find llvm-x86_64-unknown-cosmo/bin -type l,f | while IFS= read -r file; do
-            bname=$(basename "${file}")
-            if [ -h "${file}" ] || ! file "${file}" | grep ELF -q; then
-              echo "copy ${bname}"
-              cp -d "llvm-x86_64-unknown-cosmo/bin/${bname}" "llvm-ape/bin/${bname}"
-            else
-              # echo "fixupobj ${bname}"
-              fixupobj "llvm-x86_64-unknown-cosmo/bin/${bname}"
-              fixupobj "llvm-aarch64-unknown-cosmo/bin/${bname}"
-          
-              echo "apelink ${bname}"
-              apelink -V -1 \
-              -l "${COSMO}/bin/ape-x86_64.elf" \
-              -l "${COSMO}/bin/ape-aarch64.elf" \
-              -M "${COSMO}/bin/ape-m1.c" \
-              -o "llvm-ape/bin/${bname}" \
-              -s \
-              "llvm-x86_64-unknown-cosmo/bin/${bname}" \
-              "llvm-aarch64-unknown-cosmo/bin/${bname}"
+          find llvm-${{matrix.target}}/bin -type f ! -lname '*' | while IFS= read -r file; do
+            if file "$file" | grep -q ELF; then
+              "$ROOTDIR/android-ndk-r${{inputs.version}}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" -s "$file"
             fi
           done
-          cp -R llvm-x86_64-unknown-cosmo/include llvm-ape
-          cp -R llvm-x86_64-unknown-cosmo/lib llvm-ape
-          cp -R llvm-x86_64-unknown-cosmo/libexec llvm-ape
-          cp -R llvm-x86_64-unknown-cosmo/share llvm-ape
+          file llvm-${{matrix.target}}/bin/*
+          tree llvm-${{matrix.target}}
 
       - name: Compress
         run: |
           projects=$(echo "${{inputs.projects}}" | tr ";" "+")
-          tarball_name=${projects}-r${{inputs.version}}-ape
+          tarball_name=${projects}-r${{inputs.version}}-${{matrix.target}}
           echo tarball_name=${tarball_name} >> ${GITHUB_ENV}
-          mv llvm-ape ${tarball_name}
+          mv llvm-${{matrix.target}} ${tarball_name}
           tar -c ${tarball_name} | xz -T0 -v >${tarball_name}.tar.xz
 
       - name: Upload release

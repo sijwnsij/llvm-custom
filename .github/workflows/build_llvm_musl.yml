@@ -91,7 +91,14 @@ jobs:
 
           rm -rf "$ROOTDIR/../llvm_android"
 
-          for PATCH in $ROOTDIR/patches/musl/llvm/$LLVM_VERSION/*.patch; do
+          if [ -d "$ROOTDIR/patches/musl/llvm/$LLVM_VERSION" ]; then
+            for PATCH in $ROOTDIR/patches/musl/llvm/$LLVM_VERSION/*.patch; do
+              echo "Applying $(basename "$PATCH")..."
+              git apply "$PATCH"
+            done
+          fi
+
+          for PATCH in $ROOTDIR/patches/global/llvm/$LLVM_VERSION/*.patch; do
             echo "Applying $(basename "$PATCH")..."
             git apply "$PATCH"
           done
