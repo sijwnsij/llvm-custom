@@ -251,6 +251,7 @@ jobs:
             -DLLVM_ENABLE_THREADS=ON \
             -DLLVM_VERSION_SUFFIX="" \
             -DCLANG_VENDOR="Android" \
+            -DHAVE_DLOPEN=OFF \
             -DCLANG_REPOSITORY_STRING="https://github.com/${{ github.repository_owner }}/llvm-custom" \
             -DPACKAGE_BUGREPORT="https://github.com/${{ github.repository_owner }}/android-ndk-custom/issues/"
 
