@@ -61,8 +61,8 @@ jobs:
           LLVM_REV=$($CLANG_VERSION_CMD | sed -E 's/.*llvm-project ([a-f0-9]{40}).*/\1/' | head -n 1)
           ANDROID_REV=$(grep 'llvm_android/+/.*' "$CLANG_SOURCE_INFO" | sed -n 's/.*llvm_android\/\+//; s/\/patches.*//p' | sed 's/\/\+//g; s/^\+//g' | head -n 1)
 
-          if [[ "${{inputs.version}}" == "29-beta3" || "${{inputs.version}}" == 3* ]]; then
-            ANDROID_REV="mirror-goog-main-llvm-toolchain"
+          if [[ "${{inputs.version}}" == "29-beta3" ]]; then
+            ANDROID_REV="d113e48090fad0f0ab54ab8a32eb118a41867fce"
           fi
 
           if [[ -z "$LLVM_VERSION" || -z "$LLVM_REV" || -z "$ANDROID_REV" ]]; then
