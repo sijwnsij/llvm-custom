@@ -233,6 +233,8 @@ jobs:
             -DCMAKE_C_FLAGS="-fstack-protector-strong" \
             -DCMAKE_CXX_FLAGS="-fstack-protector-strong" \
             -DLLVM_ENABLE_PROJECTS="${{inputs.projects}}" \
+            -DLLVM_REPOSITORY="https://android.googlesource.com/toolchain/llvm-project" \
+            -DCLANG_REPOSITORY_STRING="https://android.googlesource.com/toolchain/llvm-project" \
             -DLLVM_ENABLE_ZLIB=FORCE_ON \
             -DLLVM_ENABLE_ZSTD=FORCE_ON \
             -Dzstd_LIBRARY="${TARGET_INSTALL_DIR}/lib/libzstd.a" \
