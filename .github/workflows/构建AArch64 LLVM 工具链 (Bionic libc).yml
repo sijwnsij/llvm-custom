@@ -236,7 +236,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX="${ROOTDIR}/llvm-${{matrix.target}}" \
             -DCMAKE_PREFIX_PATH="${TARGET_INSTALL_DIR}" \
             -DLLVM_TARGETS_TO_BUILD="${{inputs.targets}}" \
-            -DCMAKE_BUILD_TYPE=MinSizeRel \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CROSSCOMPILING=True \
             -DCMAKE_SYSTEM_NAME=Linux \
             -DLLVM_DEFAULT_TARGET_TRIPLE=${{matrix.target}}${ANDROID_PLATFORM} \
@@ -248,15 +248,22 @@ jobs:
             -DCMAKE_AR="${TOOLCHAIN}/bin/llvm-ar" \
             -DCMAKE_RANLIB="${TOOLCHAIN}/bin/llvm-ranlib" \
             -DCMAKE_STRIP="${TOOLCHAIN}/bin/llvm-strip" \
-            -DCMAKE_C_FLAGS="-fstack-protector-strong" \
-            -DCMAKE_CXX_FLAGS="-fstack-protector-strong" \
+            -DCMAKE_C_FLAGS="-O3 -fstrict-aliasing -fdata-sections -ffunction-sections -fno-plt" \
+            -DCMAKE_CXX_FLAGS="-O3 -fstrict-aliasing -fdata-sections -ffunction-sections -fno-plt -fno-exceptions -fno-rtti" \
+            -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -Wl,--icf=safe -Wl,--as-needed -Wl,--hash-style=gnu" \
             -DLLVM_ENABLE_PROJECTS="${{inputs.projects}}" \
+            -DCLANG_VENDOR="$VENDOR_PREFIX" \
+            -DLLVM_FORCE_VC_REPOSITORY="$GOOGLE_LLVM_REPO" \
+            -DLLVM_FORCE_VC_REVISION="$LLVM_REV" \
             -DLLVM_ENABLE_ZLIB=FORCE_ON \
             -DLLVM_ENABLE_ZSTD=FORCE_ON \
             -Dzstd_LIBRARY="${TARGET_INSTALL_DIR}/lib/libzstd.a" \
             -Dzstd_INCLUDE_DIR="${TARGET_INSTALL_DIR}/include" \
             -DLLVM_USE_STATIC_ZSTD=ON \
             -DLLVM_BUILD_STATIC=ON \
+            -DLLVM_OPTIMIZED_TABLEGEN=ON \
+            -DLLVM_ENABLE_ASSERTIONS=OFF \
+            -DLLVM_ENABLE_LTO=Thin \
             -DCLANG_ENABLE_ARCMT=OFF \
             -DLLVM_LINK_LLVM_DYLIB=OFF \
             -DLIBCLANG_BUILD_STATIC=ON \
@@ -294,10 +301,7 @@ jobs:
             -DLLVM_ENABLE_LIBXML2=OFF \
             -DLLVM_ENABLE_CURL=OFF \
             -DLLVM_ENABLE_THREADS=ON \
-            -DLLVM_VERSION_SUFFIX="" \
-            -DCLANG_VENDOR="$VENDOR_PREFIX" \
-            -DLLVM_FORCE_VC_REPOSITORY="$GOOGLE_LLVM_REPO" \
-            -DLLVM_FORCE_VC_REVISION="$LLVM_REV"
+            -DLLVM_VERSION_SUFFIX=""
 
           echo "开始构建并安装 ..."
           cmake --build "${TARGET_BUILD_DIR}" --target install
