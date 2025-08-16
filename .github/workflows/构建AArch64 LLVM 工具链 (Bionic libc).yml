@@ -8,6 +8,10 @@ on:
         description: "NDK 版本号: "
         default: "r28c"
         required: true
+      targets:
+        description: "支持的架构: "
+        default: "X86;AArch64;ARM;RISCV"
+        required: true
       projects:
         description: "需要构建的项目: "
         # bolt;clang;clang-tools-extra;compiler-rt;cross-project-tests;libc;libclc;lld;lldb;mlir;openmp;polly;pstl;flang
@@ -231,7 +235,7 @@ jobs:
           cmake -S "$ROOTDIR/llvm" -B "${TARGET_BUILD_DIR}" -G Ninja \
             -DCMAKE_INSTALL_PREFIX="${ROOTDIR}/llvm-${{matrix.target}}" \
             -DCMAKE_PREFIX_PATH="${TARGET_INSTALL_DIR}" \
-            -DLLVM_TARGETS_TO_BUILD="X86;AArch64;ARM;RISCV" \
+            -DLLVM_TARGETS_TO_BUILD="${{inputs.targets}}" \
             -DCMAKE_BUILD_TYPE=MinSizeRel \
             -DCMAKE_CROSSCOMPILING=True \
             -DCMAKE_SYSTEM_NAME=Linux \
@@ -292,9 +296,10 @@ jobs:
             -DLLVM_ENABLE_THREADS=ON \
             -DLLVM_VERSION_SUFFIX="" \
             -DCLANG_VENDOR="$VENDOR_PREFIX" \
-            -DCLANG_REPOSITORY_STRING="$GOOGLE_LLVM_REPO $LLVM_REV" \
-            -DLLVM_FORCE_VC_REPOSITORY="$GOOGLE_LLVM_REPO" \
-            -DLLVM_FORCE_VC_REVISION="$LLVM_REV"
+            -DCLANG_REPOSITORY_STRING="$GOOGLE_LLVM_REPO" \
+            -DCLANG_REVISION="$LLVM_REV" \
+            -DLLVM_REPOSITORY="$GOOGLE_LLVM_REPO" \
+            -DLLVM_REVISION="$LLVM_REV"
 
           echo "开始构建并安装 ..."
           cmake --build "${TARGET_BUILD_DIR}" --target install
