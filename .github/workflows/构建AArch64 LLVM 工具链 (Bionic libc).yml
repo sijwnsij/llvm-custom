@@ -60,21 +60,55 @@ jobs:
           curl -sSfL -o android-ndk.zip "https://dl.google.com/android/repository/android-ndk-r${{inputs.version}}-linux.zip"
           unzip -qq android-ndk.zip -d "$ROOTDIR"
 
+          echo "========== 官方 clang --version 原样输出 =========="
+          "$LLVM_BIN/clang" --version || true
+          echo "==================================================="
+
+          # 把整行揉成一行，避免换行/换段影响正则匹配
+          VERLINE=$("$LLVM_BIN/clang" --version | tr '\n' ' ')
+
           echo "解析 clang/llvm 版本与提交信息 ..."
-          LLVM_VERSION=$($CLANG_VERSION_CMD | sed -n 's/.*clang version \([0-9][0-9.]*[a-zA-Z0-9]*\).*/\1/p')
-          LLVM_REV=$($CLANG_VERSION_CMD | sed -n 's/.*llvm-project \([a-f0-9]\{7,40\}\).*/\1/p' | head -n 1)
-          ANDROID_REV=$(grep -oE 'llvm_android/\+[a-f0-9]+' "$CLANG_SOURCE_INFO" | head -n1 | sed 's#.*/\+##')
+          # 版本号（如 19.0.1 或 19.0.1git）
+          LLVM_VERSION=$(printf "%s" "$VERLINE" | sed -n 's/.*clang version \([0-9][0-9.]*[A-Za-z0-9]*\).*/\1/p')
 
-          # === 新增：精确抓取官方 vendor 前缀与仓库 URL ===
-          VENDOR_PREFIX=$($CLANG_VERSION_CMD | sed -n 's/^\(Android[^)]*)\) clang version.*/\1 /p')
-          LLVM_REPO=$($CLANG_VERSION_CMD | sed -n 's/.*(\(https[^ )]*\) [a-f0-9]\{7,40\}).*/\1/p')
+          # 官方 vendor 前缀：抓取以 Android 开头到右括号为止（含空格结尾）
+          VENDOR_PREFIX=$(printf "%s" "$VERLINE" | sed -n 's/.*\(Android[^)]*)\) clang version.*/\1 /p')
 
-          if [[ "${{inputs.version}}" == "29-beta3" ]]; then
+          # 仓库 URL 与提交哈希（最后一对括号里通常是 "<url> <hash>"）
+          LLVM_REPO=$(printf "%s" "$VERLINE" | sed -n 's/.*( *\([^ )]*android\.googlesource\.com[^ )]*\) *[0-9a-f]\{7,40\} *).*/\1/p')
+          LLVM_REV=$(printf "%s" "$VERLINE" | sed -n 's/.*( *[^ )]* *\([0-9a-f]\{7,40\}\) *).*/\1/p')
+
+          # ANDROID_REV 主要用于拉 llvm_android 补丁；不同 rXX 包路径可能微调，先做存在性判断
+          ANDROID_REV=""
+          if [[ -f "$CLANG_SOURCE_INFO" ]]; then
+            ANDROID_REV=$(grep -oE 'llvm_android/\+[0-9a-f]+' "$CLANG_SOURCE_INFO" | head -n1 | sed 's#.*/\+##' || true)
+          fi
+          if [[ "${{inputs.version}}" == "29-beta3" && -z "${ANDROID_REV}" ]]; then
             ANDROID_REV="d113e48090fad0f0ab54ab8a32eb118a41867fce"
           fi
 
-          if [[ -z "${LLVM_VERSION:-}" || -z "${LLVM_REV:-}" || -z "${ANDROID_REV:-}" || -z "${VENDOR_PREFIX:-}" || -z "${LLVM_REPO:-}" ]]; then
-            echo "错误: 无法解析版本/提交信息（LLVM_VERSION=$LLVM_VERSION LLVM_REV=$LLVM_REV ANDROID_REV=$ANDROID_REV VENDOR_PREFIX='$VENDOR_PREFIX' LLVM_REPO='$LLVM_REPO'）"
+          # 兜底：若 vendor/repo 仍为空，用更宽松的 grep 再试一次
+          if [[ -z "${VENDOR_PREFIX}" ]]; then
+            VENDOR_PREFIX=$("$LLVM_BIN/clang" --version | head -n1 | grep -oE '^Android[^)]*\)' | sed 's/$/ /' || true)
+          fi
+          if [[ -z "${LLVM_REPO}" || -z "${LLVM_REV}" ]]; then
+            # 从括号对内最后一次出现的 android.googlesource.com 提取
+            PAREN_BLOCK=$("$LLVM_BIN/clang" --version | tr '\n' ' ' | grep -oE '\([^)]*android\.googlesource\.com[^)]*\)' | tail -n1 | sed 's/[()]//g' || true)
+            # 期望形如 "<url> <hexhash>"
+            LLVM_REPO=$(printf "%s" "$PAREN_BLOCK" | awk '{print $1}' || true)
+            LLVM_REV=$(printf "%s" "$PAREN_BLOCK" | awk '{print $2}' || true)
+          fi
+
+          echo "解析结果："
+          echo "  LLVM_VERSION   = ${LLVM_VERSION:-<empty>}"
+          echo "  VENDOR_PREFIX  = ${VENDOR_PREFIX:-<empty>}"
+          echo "  LLVM_REPO      = ${LLVM_REPO:-<empty>}"
+          echo "  LLVM_REV       = ${LLVM_REV:-<empty>}"
+          echo "  ANDROID_REV    = ${ANDROID_REV:-<empty>}"
+
+          # 严格校验（vendor/repo/rev/版本 必须拿到）
+          if [[ -z "${LLVM_VERSION:-}" || -z "${VENDOR_PREFIX:-}" || -z "${LLVM_REPO:-}" || -z "${LLVM_REV:-}" ]]; then
+            echo "错误: 解析失败。请把上面“官方 clang --version 原样输出”贴给我。"
             exit 1
           fi
 
@@ -83,29 +117,31 @@ jobs:
           tar -xf llvm-project.tar.gz
           rm llvm-project.tar.gz
 
-          echo "克隆 llvm_android (提交 $ANDROID_REV)..."
-          git clone --quiet https://android.googlesource.com/toolchain/llvm_android ../llvm_android
-          cd ../llvm_android
-          git checkout --quiet "$ANDROID_REV"
-          cd "$ROOTDIR"
-
-          echo "应用 llvm_android 补丁 ..."
-          mapfile -t PATCHES < <(grep -oP 'patches/\S+' "$CLANG_SOURCE_INFO" | sed 's/)$//')
-          for PATCH in "${PATCHES[@]}"; do
+          # 只有能拿到 ANDROID_REV 才应用补丁；拿不到就跳过（不影响 -v 一致性）
+          if [[ -n "${ANDROID_REV}" ]]; then
+            echo "克隆 llvm_android (提交 $ANDROID_REV)..."
+            git clone --quiet https://android.googlesource.com/toolchain/llvm_android ../llvm_android
+            ( cd ../llvm_android && git checkout --quiet "$ANDROID_REV" )
+            echo "应用 llvm_android 补丁 ..."
+            mapfile -t PATCHES < <(grep -oP 'patches/\S+' "$CLANG_SOURCE_INFO" 2>/dev/null | sed 's/)$//') || true
+            for PATCH in "${PATCHES[@]:-}"; do
               echo "应用补丁: $(basename "$PATCH") ..."
               if [[ -f "$ROOTDIR/../llvm_android/$PATCH" ]]; then
-                  git apply "$ROOTDIR/../llvm_android/$PATCH" || true
+                git apply "$ROOTDIR/../llvm_android/$PATCH" || true
               elif [[ -f "$ROOTDIR/../llvm_android/cherry/$PATCH" ]]; then
-                  git apply "$ROOTDIR/../llvm_android/cherry/$PATCH" || true
+                git apply "$ROOTDIR/../llvm_android/cherry/$PATCH" || true
               fi
-          done
-          rm -rf "$ROOTDIR/../llvm_android"
+            done
+            rm -rf "$ROOTDIR/../llvm_android"
+          else
+            echo "警告: 未找到 ANDROID_REV，跳过 llvm_android 补丁（仅影响源码一致性，不影响 -v 文本注入）"
+          fi
 
           echo "应用仓库内全局补丁 (按 LLVM 版本匹配)..."
           shopt -s nullglob
           for PATCH in "$ROOTDIR/patches/global/llvm/$LLVM_VERSION"/*.patch; do
             echo "应用补丁: $(basename "$PATCH") ..."
-            git apply "$PATCH"
+            git apply "$PATCH" || true
           done
           shopt -u nullglob
 
@@ -114,7 +150,12 @@ jobs:
             /&& !defined(__ANDROID__)/! s/$/ \&\& !defined(__ANDROID__)/
           }' "$ROOTDIR/llvm/tools/llvm-rtdyld/llvm-rtdyld.cpp" || true
 
-          echo "补丁已全部应用完成"
+          # 把解析到的 vendor/repo/rev 存成临时文件，给后面的 CMake 用
+          echo "$VENDOR_PREFIX" > "$ROOTDIR/.parsed_vendor"
+          echo "$LLVM_REPO"     > "$ROOTDIR/.parsed_repo"
+          echo "$LLVM_REV"      > "$ROOTDIR/.parsed_rev"
+
+          echo "补丁/解析阶段完成"
 
       - name: 安装依赖
         run: |
@@ -284,10 +325,11 @@ jobs:
             -DLLVM_ENABLE_CURL=OFF \
             -DLLVM_ENABLE_THREADS=ON \
             -DLLVM_VERSION_SUFFIX="" \
-            -DCLANG_VENDOR="${VENDOR_PREFIX}" \
-            -DCLANG_REPOSITORY_STRING="${LLVM_REPO} ${LLVM_REV}" \
-            -DLLVM_FORCE_VC_REPOSITORY="${LLVM_REPO}" \
-            -DLLVM_FORCE_VC_REVISION="${LLVM_REV}"
+            -DCLANG_VENDOR="$(cat "$ROOTDIR/.parsed_vendor")" \
+            -DCLANG_REPOSITORY_STRING="$(cat "$ROOTDIR/.parsed_repo") $(cat "$ROOTDIR/.parsed_rev")" \
+            -DLLVM_FORCE_VC_REPOSITORY="$(cat "$ROOTDIR/.parsed_repo")" \
+            -DLLVM_FORCE_VC_REVISION="$(cat "$ROOTDIR/.parsed_rev")"
+
 
           echo "开始构建并安装 ..."
           cmake --build "${TARGET_BUILD_DIR}" --target install
