@@ -252,7 +252,7 @@ jobs:
             -DCMAKE_CXX_FLAGS="-O3 -fstrict-aliasing -fdata-sections -ffunction-sections -fno-plt -fno-exceptions -fno-rtti" \
             -DCMAKE_EXE_LINKER_FLAGS="-Wl,--gc-sections -Wl,--icf=safe -Wl,--as-needed -Wl,--hash-style=gnu" \
             -DLLVM_ENABLE_PROJECTS="${{inputs.projects}}" \
-            -DCLANG_VENDOR="$VENDOR_PREFIX" \
+            # -DCLANG_VENDOR="$VENDOR_PREFIX" \
             -DLLVM_FORCE_VC_REPOSITORY="$GOOGLE_LLVM_REPO" \
             -DLLVM_FORCE_VC_REVISION="$LLVM_REV" \
             -DLLVM_ENABLE_ZLIB=FORCE_ON \
